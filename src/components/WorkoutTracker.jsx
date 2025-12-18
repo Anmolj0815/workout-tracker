@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Plus, X, ChevronRight } from 'lucide-react';
+import { AlertCircle, Plus, X, Trash2, ChevronRight } from 'lucide-react';
 
 const WorkoutTracker = () => {
   const [currentScreen, setCurrentScreen] = useState('home');
@@ -9,48 +9,42 @@ const WorkoutTracker = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [workoutToDelete, setWorkoutToDelete] = useState(null);
 
-  // Load workouts from localStorage
+  // Load workouts from storage
   useEffect(() => {
     loadWorkouts();
   }, []);
 
-  const loadWorkouts = () => {
+  const loadWorkouts = async () => {
     try {
-      const savedWorkouts = localStorage.getItem('workouts');
-      if (savedWorkouts) {
-        const parsed = JSON.parse(savedWorkouts);
-        const sorted = parsed.sort((a, b) => new Date(b.date) - new Date(a.date));
-        setWorkouts(sorted);
+      const result = await window.storage.list('workout:');
+      if (result && result.keys) {
+        const workoutPromises = result.keys.map(async (key) => {
+          const data = await window.storage.get(key);
+          return data ? JSON.parse(data.value) : null;
+        });
+        const loadedWorkouts = (await Promise.all(workoutPromises))
+          .filter(w => w !== null)
+          .sort((a, b) => new Date(b.date) - new Date(a.date));
+        setWorkouts(loadedWorkouts);
       }
     } catch (error) {
-      console.error('Error loading workouts:', error);
+      console.log('No workouts found or error loading:', error);
     }
   };
 
-  const saveWorkout = (workout) => {
+  const saveWorkout = async (workout) => {
     try {
-      const existingWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-      const index = existingWorkouts.findIndex(w => w.id === workout.id);
-      
-      if (index !== -1) {
-        existingWorkouts[index] = workout;
-      } else {
-        existingWorkouts.push(workout);
-      }
-      
-      localStorage.setItem('workouts', JSON.stringify(existingWorkouts));
-      loadWorkouts();
+      await window.storage.set(`workout:${workout.id}`, JSON.stringify(workout));
+      await loadWorkouts();
     } catch (error) {
       console.error('Error saving workout:', error);
     }
   };
 
-  const deleteWorkout = (workoutId) => {
+  const deleteWorkout = async (workoutId) => {
     try {
-      const existingWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-      const filtered = existingWorkouts.filter(w => w.id !== workoutId);
-      localStorage.setItem('workouts', JSON.stringify(filtered));
-      loadWorkouts();
+      await window.storage.delete(`workout:${workoutId}`);
+      await loadWorkouts();
       setShowDeleteModal(false);
       setWorkoutToDelete(null);
     } catch (error) {
@@ -68,32 +62,32 @@ const WorkoutTracker = () => {
   };
 
   const addExercise = () => {
-    setCurrentWorkout({
-      ...currentWorkout,
+    setCurrentWorkout(prev => ({
+      ...prev,
       exercises: [
-        ...currentWorkout.exercises,
+        ...prev.exercises,
         {
           id: Date.now().toString(),
           name: '',
           sets: [{ reps: '', weight: '' }]
         }
       ]
-    });
+    }));
   };
 
   const updateExerciseName = (exerciseId, name) => {
-    setCurrentWorkout({
-      ...currentWorkout,
-      exercises: currentWorkout.exercises.map(ex =>
+    setCurrentWorkout(prev => ({
+      ...prev,
+      exercises: prev.exercises.map(ex =>
         ex.id === exerciseId ? { ...ex, name } : ex
       )
-    });
+    }));
   };
 
   const updateSet = (exerciseId, setIndex, field, value) => {
-    setCurrentWorkout({
-      ...currentWorkout,
-      exercises: currentWorkout.exercises.map(ex =>
+    setCurrentWorkout(prev => ({
+      ...prev,
+      exercises: prev.exercises.map(ex =>
         ex.id === exerciseId
           ? {
               ...ex,
@@ -103,28 +97,28 @@ const WorkoutTracker = () => {
             }
           : ex
       )
-    });
+    }));
   };
 
   const addSet = (exerciseId) => {
-    setCurrentWorkout({
-      ...currentWorkout,
-      exercises: currentWorkout.exercises.map(ex =>
+    setCurrentWorkout(prev => ({
+      ...prev,
+      exercises: prev.exercises.map(ex =>
         ex.id === exerciseId
           ? { ...ex, sets: [...ex.sets, { reps: '', weight: '' }] }
           : ex
       )
-    });
+    }));
   };
 
   const removeExercise = (exerciseId) => {
-    setCurrentWorkout({
-      ...currentWorkout,
-      exercises: currentWorkout.exercises.filter(ex => ex.id !== exerciseId)
-    });
+    setCurrentWorkout(prev => ({
+      ...prev,
+      exercises: prev.exercises.filter(ex => ex.id !== exerciseId)
+    }));
   };
 
-  const validateAndSaveWorkout = () => {
+  const validateAndSaveWorkout = async () => {
     if (currentWorkout.exercises.length === 0) {
       alert('Please add at least one exercise');
       return;
@@ -147,7 +141,7 @@ const WorkoutTracker = () => {
       }
     }
 
-    saveWorkout(currentWorkout);
+    await saveWorkout(currentWorkout);
     setCurrentScreen('home');
     setCurrentWorkout(null);
   };
@@ -202,6 +196,15 @@ const WorkoutTracker = () => {
                     e.preventDefault();
                     handleLongPress(workout);
                   }}
+                  onTouchStart={(e) => {
+                    const touchTimeout = setTimeout(() => handleLongPress(workout), 500);
+                    e.target.touchTimeout = touchTimeout;
+                  }}
+                  onTouchEnd={(e) => {
+                    if (e.target.touchTimeout) {
+                      clearTimeout(e.target.touchTimeout);
+                    }
+                  }}
                   className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors"
                 >
                   <div>
@@ -229,7 +232,7 @@ const WorkoutTracker = () => {
         <div className="max-w-md mx-auto px-4 py-4 flex items-center justify-between">
           <button
             onClick={() => {
-              if (window.confirm('Discard workout?')) {
+              if (confirm('Discard workout?')) {
                 setCurrentScreen('home');
                 setCurrentWorkout(null);
               }
@@ -367,7 +370,7 @@ const WorkoutTracker = () => {
         </div>
 
         <div className="space-y-4">
-          {selectedWorkout.exercises.map((exercise) => (
+          {selectedWorkout.exercises.map((exercise, exIndex) => (
             <div
               key={exercise.id}
               className="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
