@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Plus, X, Trash2, ChevronRight } from 'lucide-react';
+import { AlertCircle, Plus, X, ChevronRight } from 'lucide-react';
 
 const WorkoutTracker = () => {
   const [currentScreen, setCurrentScreen] = useState('home');
@@ -9,42 +9,47 @@ const WorkoutTracker = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [workoutToDelete, setWorkoutToDelete] = useState(null);
 
-  // Load workouts from storage
   useEffect(() => {
     loadWorkouts();
   }, []);
 
-  const loadWorkouts = async () => {
+  const loadWorkouts = () => {
     try {
-      const result = await window.storage.list('workout:');
-      if (result && result.keys) {
-        const workoutPromises = result.keys.map(async (key) => {
-          const data = await window.storage.get(key);
-          return data ? JSON.parse(data.value) : null;
-        });
-        const loadedWorkouts = (await Promise.all(workoutPromises))
-          .filter(w => w !== null)
-          .sort((a, b) => new Date(b.date) - new Date(a.date));
-        setWorkouts(loadedWorkouts);
+      const savedWorkouts = localStorage.getItem('workouts');
+      if (savedWorkouts) {
+        const parsed = JSON.parse(savedWorkouts);
+        const sorted = parsed.sort((a, b) => new Date(b.date) - new Date(a.date));
+        setWorkouts(sorted);
       }
     } catch (error) {
-      console.log('No workouts found or error loading:', error);
+      console.error('Error loading workouts:', error);
     }
   };
 
-  const saveWorkout = async (workout) => {
+  const saveWorkout = (workout) => {
     try {
-      await window.storage.set(`workout:${workout.id}`, JSON.stringify(workout));
-      await loadWorkouts();
+      const existingWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+      const index = existingWorkouts.findIndex(w => w.id === workout.id);
+      
+      if (index !== -1) {
+        existingWorkouts[index] = workout;
+      } else {
+        existingWorkouts.push(workout);
+      }
+      
+      localStorage.setItem('workouts', JSON.stringify(existingWorkouts));
+      loadWorkouts();
     } catch (error) {
       console.error('Error saving workout:', error);
     }
   };
 
-  const deleteWorkout = async (workoutId) => {
+  const deleteWorkout = (workoutId) => {
     try {
-      await window.storage.delete(`workout:${workoutId}`);
-      await loadWorkouts();
+      const existingWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+      const filtered = existingWorkouts.filter(w => w.id !== workoutId);
+      localStorage.setItem('workouts', JSON.stringify(filtered));
+      loadWorkouts();
       setShowDeleteModal(false);
       setWorkoutToDelete(null);
     } catch (error) {
@@ -62,42 +67,48 @@ const WorkoutTracker = () => {
   };
 
   const addExercise = () => {
+    const newExercise = {
+      id: `ex-${Date.now()}-${Math.random()}`,
+      name: '',
+      sets: [{ id: `set-${Date.now()}-${Math.random()}`, reps: '', weight: '' }]
+    };
+    
     setCurrentWorkout(prev => ({
       ...prev,
-      exercises: [
-        ...prev.exercises,
-        {
-          id: Date.now().toString(),
-          name: '',
-          sets: [{ reps: '', weight: '' }]
-        }
-      ]
+      exercises: [...prev.exercises, newExercise]
     }));
   };
 
   const updateExerciseName = (exerciseId, name) => {
-    setCurrentWorkout(prev => ({
-      ...prev,
-      exercises: prev.exercises.map(ex =>
-        ex.id === exerciseId ? { ...ex, name } : ex
-      )
-    }));
+    setCurrentWorkout(prev => {
+      const updated = {
+        ...prev,
+        exercises: prev.exercises.map(ex =>
+          ex.id === exerciseId ? { ...ex, name: name } : ex
+        )
+      };
+      return updated;
+    });
   };
 
-  const updateSet = (exerciseId, setIndex, field, value) => {
-    setCurrentWorkout(prev => ({
-      ...prev,
-      exercises: prev.exercises.map(ex =>
-        ex.id === exerciseId
-          ? {
+  const updateSet = (exerciseId, setId, field, value) => {
+    setCurrentWorkout(prev => {
+      const updated = {
+        ...prev,
+        exercises: prev.exercises.map(ex => {
+          if (ex.id === exerciseId) {
+            return {
               ...ex,
-              sets: ex.sets.map((set, idx) =>
-                idx === setIndex ? { ...set, [field]: value } : set
+              sets: ex.sets.map(s =>
+                s.id === setId ? { ...s, [field]: value } : s
               )
-            }
-          : ex
-      )
-    }));
+            };
+          }
+          return ex;
+        })
+      };
+      return updated;
+    });
   };
 
   const addSet = (exerciseId) => {
@@ -105,7 +116,13 @@ const WorkoutTracker = () => {
       ...prev,
       exercises: prev.exercises.map(ex =>
         ex.id === exerciseId
-          ? { ...ex, sets: [...ex.sets, { reps: '', weight: '' }] }
+          ? {
+              ...ex,
+              sets: [
+                ...ex.sets,
+                { id: `set-${Date.now()}-${Math.random()}`, reps: '', weight: '' }
+              ]
+            }
           : ex
       )
     }));
@@ -118,7 +135,7 @@ const WorkoutTracker = () => {
     }));
   };
 
-  const validateAndSaveWorkout = async () => {
+  const validateAndSaveWorkout = () => {
     if (currentWorkout.exercises.length === 0) {
       alert('Please add at least one exercise');
       return;
@@ -141,7 +158,7 @@ const WorkoutTracker = () => {
       }
     }
 
-    await saveWorkout(currentWorkout);
+    saveWorkout(currentWorkout);
     setCurrentScreen('home');
     setCurrentWorkout(null);
   };
@@ -157,7 +174,6 @@ const WorkoutTracker = () => {
     setShowDeleteModal(true);
   };
 
-  // Home Screen
   const HomeScreen = () => (
     <div className="min-h-screen bg-gray-50 pb-20">
       <div className="bg-white shadow-sm">
@@ -196,15 +212,6 @@ const WorkoutTracker = () => {
                     e.preventDefault();
                     handleLongPress(workout);
                   }}
-                  onTouchStart={(e) => {
-                    const touchTimeout = setTimeout(() => handleLongPress(workout), 500);
-                    e.target.touchTimeout = touchTimeout;
-                  }}
-                  onTouchEnd={(e) => {
-                    if (e.target.touchTimeout) {
-                      clearTimeout(e.target.touchTimeout);
-                    }
-                  }}
                   className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors"
                 >
                   <div>
@@ -225,189 +232,204 @@ const WorkoutTracker = () => {
     </div>
   );
 
-  // New Workout Screen
-  const NewWorkoutScreen = () => (
-    <div className="min-h-screen bg-gray-50 pb-20">
-      <div className="bg-white shadow-sm sticky top-0 z-10">
-        <div className="max-w-md mx-auto px-4 py-4 flex items-center justify-between">
-          <button
-            onClick={() => {
-              if (confirm('Discard workout?')) {
-                setCurrentScreen('home');
-                setCurrentWorkout(null);
-              }
-            }}
-            className="text-gray-600 hover:text-gray-800"
-          >
-            Cancel
-          </button>
-          <h1 className="text-xl font-bold text-gray-800">New Workout</h1>
-          <button
-            onClick={validateAndSaveWorkout}
-            className="text-blue-500 hover:text-blue-600 font-semibold"
-          >
-            Save
-          </button>
-        </div>
-      </div>
+  const NewWorkoutScreen = () => {
+    if (!currentWorkout) return null;
 
-      <div className="max-w-md mx-auto px-4 py-6">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
-          <label className="text-sm font-medium text-gray-700">Workout Date</label>
-          <input
-            type="date"
-            value={currentWorkout.date.split('T')[0]}
-            onChange={(e) =>
-              setCurrentWorkout({
-                ...currentWorkout,
-                date: new Date(e.target.value).toISOString()
-              })
-            }
-            className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        <button
-          onClick={addExercise}
-          className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg flex items-center justify-center gap-2 shadow-md mb-6 transition-colors"
-        >
-          <Plus size={20} />
-          Add Exercise
-        </button>
-
-        <div className="space-y-4">
-          {currentWorkout.exercises.map((exercise) => (
-            <div
-              key={exercise.id}
-              className="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
+    return (
+      <div className="min-h-screen bg-gray-50 pb-20">
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-md mx-auto px-4 py-4 flex items-center justify-between">
+            <button
+              onClick={() => {
+                if (window.confirm('Discard workout?')) {
+                  setCurrentScreen('home');
+                  setCurrentWorkout(null);
+                }
+              }}
+              className="text-gray-600 hover:text-gray-800"
             >
-              <div className="flex items-start justify-between mb-3">
-                <input
-                  type="text"
-                  placeholder="Exercise Name"
-                  value={exercise.name}
-                  onChange={(e) => updateExerciseName(exercise.id, e.target.value)}
-                  className="flex-1 text-lg font-semibold border-b-2 border-gray-300 focus:border-blue-500 outline-none pb-1"
-                />
+              Cancel
+            </button>
+            <h1 className="text-xl font-bold text-gray-800">New Workout</h1>
+            <button
+              onClick={validateAndSaveWorkout}
+              className="text-blue-500 hover:text-blue-600 font-semibold"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+
+        <div className="max-w-md mx-auto px-4 py-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+            <label className="text-sm font-medium text-gray-700">Workout Date</label>
+            <input
+              type="date"
+              value={currentWorkout.date.split('T')[0]}
+              onChange={(e) =>
+                setCurrentWorkout(prev => ({
+                  ...prev,
+                  date: new Date(e.target.value).toISOString()
+                }))
+              }
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <button
+            onClick={addExercise}
+            className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg flex items-center justify-center gap-2 shadow-md mb-6 transition-colors"
+          >
+            <Plus size={20} />
+            Add Exercise
+          </button>
+
+          <div className="space-y-4">
+            {currentWorkout.exercises.map((exercise) => (
+              <div
+                key={exercise.id}
+                className="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <input
+                    key={`name-${exercise.id}`}
+                    type="text"
+                    placeholder="Exercise Name"
+                    defaultValue={exercise.name}
+                    onBlur={(e) => updateExerciseName(exercise.id, e.target.value)}
+                    onChange={(e) => {
+                      exercise.name = e.target.value;
+                    }}
+                    className="flex-1 text-lg font-semibold border-b-2 border-gray-300 focus:border-blue-500 outline-none pb-1"
+                  />
+                  <button
+                    onClick={() => removeExercise(exercise.id)}
+                    className="ml-2 text-red-500 hover:text-red-600"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {exercise.sets.map((set, setIndex) => (
+                  <div key={set.id} className="mb-3 pb-3 border-b border-gray-100 last:border-0">
+                    <p className="text-sm font-medium text-gray-700 mb-2">
+                      Set {setIndex + 1}
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-gray-600 block mb-1">Reps</label>
+                        <input
+                          key={`reps-${set.id}`}
+                          type="number"
+                          inputMode="numeric"
+                          placeholder="12"
+                          defaultValue={set.reps}
+                          onBlur={(e) => updateSet(exercise.id, set.id, 'reps', e.target.value)}
+                          onChange={(e) => {
+                            set.reps = e.target.value;
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-600 block mb-1">Weight (kg)</label>
+                        <input
+                          key={`weight-${set.id}`}
+                          type="number"
+                          inputMode="decimal"
+                          placeholder="20"
+                          defaultValue={set.weight}
+                          onBlur={(e) => updateSet(exercise.id, set.id, 'weight', e.target.value)}
+                          onChange={(e) => {
+                            set.weight = e.target.value;
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
                 <button
-                  onClick={() => removeExercise(exercise.id)}
-                  className="ml-2 text-red-500 hover:text-red-600"
+                  onClick={() => addSet(exercise.id)}
+                  className="w-full text-blue-500 hover:text-blue-600 font-medium py-2 text-sm"
                 >
-                  <X size={20} />
+                  + Add Set
                 </button>
               </div>
-
-              {exercise.sets.map((set, setIndex) => (
-                <div key={setIndex} className="mb-3 pb-3 border-b border-gray-100 last:border-0">
-                  <p className="text-sm font-medium text-gray-700 mb-2">
-                    Set {setIndex + 1}
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs text-gray-600 block mb-1">Reps</label>
-                      <input
-                        type="number"
-                        placeholder="12"
-                        value={set.reps}
-                        onChange={(e) =>
-                          updateSet(exercise.id, setIndex, 'reps', e.target.value)
-                        }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-600 block mb-1">Weight (kg)</label>
-                      <input
-                        type="number"
-                        placeholder="20"
-                        value={set.weight}
-                        onChange={(e) =>
-                          updateSet(exercise.id, setIndex, 'weight', e.target.value)
-                        }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              <button
-                onClick={() => addSet(exercise.id)}
-                className="w-full text-blue-500 hover:text-blue-600 font-medium py-2 text-sm"
-              >
-                + Add Set
-              </button>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
-  // Workout Detail Screen
-  const WorkoutDetailScreen = () => (
-    <div className="min-h-screen bg-gray-50 pb-20">
-      <div className="bg-white shadow-sm sticky top-0 z-10">
-        <div className="max-w-md mx-auto px-4 py-4 flex items-center">
-          <button
-            onClick={() => {
-              setCurrentScreen('home');
-              setSelectedWorkout(null);
-            }}
-            className="text-blue-500 hover:text-blue-600 font-semibold"
-          >
-            ← Back
-          </button>
-          <h1 className="text-xl font-bold text-gray-800 ml-4">Workout Detail</h1>
-        </div>
-      </div>
+  const WorkoutDetailScreen = () => {
+    if (!selectedWorkout) return null;
 
-      <div className="max-w-md mx-auto px-4 py-6">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <h2 className="text-2xl font-bold text-gray-800">
-            {formatDate(selectedWorkout.date)}
-          </h2>
-        </div>
-
-        <div className="space-y-4">
-          {selectedWorkout.exercises.map((exercise, exIndex) => (
-            <div
-              key={exercise.id}
-              className="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
+    return (
+      <div className="min-h-screen bg-gray-50 pb-20">
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-md mx-auto px-4 py-4 flex items-center">
+            <button
+              onClick={() => {
+                setCurrentScreen('home');
+                setSelectedWorkout(null);
+              }}
+              className="text-blue-500 hover:text-blue-600 font-semibold"
             >
-              <h3 className="text-lg font-semibold text-gray-800 mb-3">
-                {exercise.name}
-              </h3>
+              ← Back
+            </button>
+            <h1 className="text-xl font-bold text-gray-800 ml-4">Workout Detail</h1>
+          </div>
+        </div>
 
-              {exercise.sets.map((set, setIndex) => (
-                <div
-                  key={setIndex}
-                  className="mb-2 pb-2 border-b border-gray-100 last:border-0 last:mb-0 last:pb-0"
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-700">
-                      Set {setIndex + 1}
-                    </span>
-                    <div className="text-sm text-gray-600">
-                      <span className="font-semibold">{set.reps}</span> reps
-                      {set.weight && (
-                        <>
-                          {' × '}
-                          <span className="font-semibold">{set.weight}</span> kg
-                        </>
-                      )}
+        <div className="max-w-md mx-auto px-4 py-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">
+              {formatDate(selectedWorkout.date)}
+            </h2>
+          </div>
+
+          <div className="space-y-4">
+            {selectedWorkout.exercises.map((exercise) => (
+              <div
+                key={exercise.id}
+                className="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
+              >
+                <h3 className="text-lg font-semibold text-gray-800 mb-3">
+                  {exercise.name}
+                </h3>
+
+                {exercise.sets.map((set, setIndex) => (
+                  <div
+                    key={setIndex}
+                    className="mb-2 pb-2 border-b border-gray-100 last:border-0 last:mb-0 last:pb-0"
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium text-gray-700">
+                        Set {setIndex + 1}
+                      </span>
+                      <div className="text-sm text-gray-600">
+                        <span className="font-semibold">{set.reps}</span> reps
+                        {set.weight && (
+                          <>
+                            {' × '}
+                            <span className="font-semibold">{set.weight}</span> kg
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ))}
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
-  // Delete Confirmation Modal
   const DeleteModal = () => (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
